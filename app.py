@@ -8,16 +8,18 @@ import uuid
 import random
 
 # ==========================================
-# 0. 系統初始化 & 旗艦級 CSS (v48.0)
+# 0. 系統初始化 & 旗艦級 CSS (v51.1)
 # ==========================================
 
-st.set_page_config(layout="wide", page_title="瑞迪資源控管 v48.0", initial_sidebar_state="expanded")
+st.set_page_config(layout="wide", page_title="瑞迪資源控管 v51.1", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
     /* 全局設定 */
     .stApp { background-color: #f8f9fa; font-family: 'Segoe UI', "Microsoft JhengHei", sans-serif; }
-    .block-container { padding-top: 1.5rem; max-width: 98% !important; }
+    
+    /* FIX: 增加上方留白，避免標題被 Streamlit 頂部白 Bar 遮住 */
+    .block-container { padding-top: 3.5rem; max-width: 98% !important; }
 
     /* --- 風險面板 (Risk Panel) --- */
     .risk-panel {
@@ -65,13 +67,21 @@ st.markdown("""
     .inv-crit { background-color: #c62828 !important; color: white !important; font-weight: bold; } 
     .inv-sim  { box-shadow: inset 0 0 0 2px #ff9800 !important; }
 
-    .proj-app { background-color: #e3f2fd !important; color: #1565c0 !important; border-left: 4px solid #1565c0 !important; font-weight: 600; }
-    .proj-prob { background-color: #f3e5f5 !important; color: #7b1fa2 !important; border-left: 4px dashed #7b1fa2 !important; font-weight: 600; }
-    .proj-pen { background-color: #fff3e0 !important; color: #e65100 !important; border-left: 3px dotted #e65100 !important; opacity: 0.9; }
+    /* 專案狀態列背景 (左側框線指示) */
+    .proj-conf { background-color: #e3f2fd !important; border-left: 4px solid #1565c0 !important; }
+    .proj-prob { background-color: #f3e5f5 !important; border-left: 4px dashed #7b1fa2 !important; }
+    .proj-pend { background-color: #fff3e0 !important; border-left: 3px dotted #e65100 !important; opacity: 0.9; }
 
-    /* 數值容器強制換行與間距 */
+    /* 狀態標籤 (Badges) */
+    .badge { padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; display: inline-block; margin-top: 4px; }
+    .badge-conf { background: #1565c0; color: white; }
+    .badge-prob { background: #7b1fa2; color: white; }
+    .badge-pend { background: #e65100; color: white; }
+
+    /* 數值容器 */
     .val-container { 
-        display: flex; flex-direction: column; align-items: center; justify-content: center; 
+        display: flex; flex-direction: column; 
+        align-items: center; justify-content: center; 
         width: 100%; line-height: 1.4;
     }
     .val-sec { font-size: 13px; font-weight: 800; display: block; color: #2d3748; margin-bottom: 2px; }
@@ -90,6 +100,7 @@ st.markdown("""
     .cell-err { background-color: #ffebee; font-weight: bold; color: #c62828; }
     
     .approval-card { background: white; padding: 12px; margin-bottom: 10px; border-radius: 6px; border-left: 4px solid #ff9800; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    .signed-card { background: white; padding: 12px; margin-bottom: 10px; border-radius: 6px; border-left: 4px solid #7b1fa2; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
 </style>
 """, unsafe_allow_html=True)
 
@@ -168,6 +179,7 @@ def get_occupied_inventory(media, target_date, region, include_probable=True):
         order = orders_map.get(item['order_id'])
         if not order: continue
         
+        # KEY LOGIC CHANGE: Probable also counts as "Occupied" (Inventory Blocked)
         if order['status'] == 'Confirmed': pass
         elif order['status'] == 'Probable' and include_probable: pass
         else: continue 
@@ -230,7 +242,7 @@ def generate_global_inventory_html(start_date, end_date):
                     if used > hard_limit: bg = "inv-crit"
                     elif pct > 1.0: bg = "inv-high"
                     elif pct > 0.8: bg = "inv-mid"
-                    content = f"<div class='val-container'><span class='val-sec'>{used:,}</span><span class='val-pct'>{int(pct*100)}%</span></div>"
+                    content = f"<div class='val-container'><span class='val-sec'>{used:,}</span><br><span class='val-pct'>{int(pct*100)}%</span></div>"
                     row_html += f"<td class='{bg}'>{content}</td>"
             body += f"<tr>{row_html}</tr>"
     return f"<div class='unified-wrapper' style='height:300px;'><table class='unified-table'><thead>{headers_html}</thead><tbody>{body}</tbody></table></div>"
@@ -521,25 +533,20 @@ def generate_excel(rows, days_cnt, start_dt, c_name, products, total_list, grand
 def render_ops_dashboard():
     st.markdown("### 🛡️ 營運戰情總控台")
     
-    # Linkage: View Button
     if st.session_state.ops_view_target:
         t = st.session_state.ops_view_target
         st.session_state.ops_view_target = None 
-        # Deep Link: Find order details to auto-set filters
         items = [i for i in st.session_state.db['order_items'] if i['order_id'] == t['id']]
         if items:
             target_media = items[0]['media']
             target_start = items[0]['start']
             target_end = items[0]['end']
             
-            # Use Session State to override widgets
             if 'ops_media_select' not in st.session_state or st.session_state.ops_media_select != target_media:
                 st.session_state.ops_media_select = target_media
-            
-            # Adjust date range to cover the order
             st.session_state.ops_d_range = (target_start, target_end)
             st.toast(f"已切換至訂單: {t['client']}")
-            st.rerun() # Rerun to apply filters
+            st.rerun()
 
     c1, c2, c3, c4 = st.columns([1.5, 1.5, 2, 1])
     with c1: media_select = st.selectbox("1. 媒體頻道", ["全家廣播", "新鮮視", "家樂福"], key="ops_media_select")
@@ -578,7 +585,6 @@ def render_ops_dashboard():
             else:
                 affected_regions = [item['region']]
             
-            # Display Logic
             is_relevant = False
             if region_select == "All": is_relevant = True
             elif region_select in affected_regions: is_relevant = True
@@ -595,15 +601,12 @@ def render_ops_dashboard():
                 if 0 <= day_idx < len(item['schedule']):
                     val = item['schedule'][day_idx] * item['sec']
                 
-                # Logic Fix: Use MAX for Project Row Display to match visual expectation
-                # If an order has multiple items (regions), we want to show the "Occupied Time", not "Sum of Seconds".
+                # Logic Fix: Use MAX for Project Row Display
                 if is_relevant and order['id'] in orders_to_display:
                     if d_str not in orders_to_display[order['id']]['schedule_data']:
                         orders_to_display[order['id']]['schedule_data'][d_str] = 0
-                    
-                    # If this order already has data for this day (from another region item), take the MAX
-                    current_val = orders_to_display[order['id']]['schedule_data'][d_str]
-                    orders_to_display[order['id']]['schedule_data'][d_str] = max(current_val, val)
+                    current = orders_to_display[order['id']]['schedule_data'][d_str]
+                    orders_to_display[order['id']]['schedule_data'][d_str] = max(current, val)
                 
                 # Update Matrix (Summation Logic)
                 for r in affected_regions:
@@ -616,11 +619,29 @@ def render_ops_dashboard():
     body_html = ""
     sorted_orders = sorted(orders_to_display.values(), key=lambda x: {"Pending": 0, "Probable": 1, "Confirmed": 2}.get(x['status'], 9))
     
+    # Status badges map
+    status_badges = {
+        "Pending": "<span class='badge badge-pend'>待審</span>",
+        "Probable": "<span class='badge badge-prob'>80% 卡位</span>",
+        "Confirmed": "<span class='badge badge-conf'>正式簽約</span>"
+    }
+
     for o in sorted_orders:
-        if o['status'] == "Pending": cls, icon = "proj-pen", "🟠"
-        elif o['status'] == "Probable": cls, icon = "proj-prob", "🟣"
-        else: cls, icon = "proj-app", "🔵"
-        row_cells = f"<td><div style='font-weight:bold;color:#333;'>{o['client']}</div><div style='font-size:10px;color:#666;'>{icon} {o['sales']}</div></td>"
+        if o['status'] == "Pending": cls = "proj-pend"
+        elif o['status'] == "Probable": cls = "proj-prob"
+        else: cls = "proj-conf"
+        
+        # New Left Column Design
+        badge = status_badges.get(o['status'], "")
+        row_cells = f"""
+        <td>
+            <div style='font-weight:bold;color:#333;margin-bottom:4px;font-size:12px;'>{o['client']}</div>
+            <div style='display:flex;justify-content:space-between;align-items:center;'>
+                <span style='font-size:11px;color:#555;'>{o['sales']}</span>
+                {badge}
+            </div>
+        </td>"""
+        
         for d in date_range:
             d_str = d.strftime("%Y-%m-%d")
             val = o['schedule_data'].get(d_str, 0)
@@ -630,31 +651,28 @@ def render_ops_dashboard():
     reg_txt = f"【{region_select}】" if region_select != "All" else "【所有區域】"
     body_html += f"<tr style='background:#eceff1;font-weight:bold;'><td colspan='{len(date_range)+1}'>∑ 庫存水位匯總 {reg_txt}</td></tr>"
     
-    # Feature: Add "Max Load" row for All Regions view
+    # Feature: Max Load Row
     if region_select == "All":
         max_load_row = f"<td>📊 全省 (最大負荷)<br><span style='font-size:9px;color:#888'>Max Load</span></td>"
         for d in date_range:
             d_str = d.strftime("%Y-%m-%d")
-            # Find max used across all regions
             max_used = 0
             for r in display_regions:
                 cell = matrix[r][d_str]
                 total = cell['used'] + cell['pending']
                 if total > max_used: max_used = total
             
-            # Color logic
             pct = max_used / capacity
             bg = "inv-safe"
             if max_used > (capacity * 1.2): bg = "inv-crit"
             elif pct > 1.0: bg = "inv-high"
             elif pct > 0.8: bg = "inv-mid"
             
-            content = f"<div class='val-container'><span class='val-sec'>{max_used:,}</span><span class='val-pct'>{int(pct*100)}%</span></div>"
+            content = f"<div class='val-container'><span class='val-sec'>{max_used:,}</span><br><span class='val-pct'>{int(pct*100)}%</span></div>"
             max_load_row += f"<td class='{bg}'>{content}</td>"
         body_html += f"<tr>{max_load_row}</tr>"
-
+    
     for r in matrix:
-        # Hide individual regions if list is too long? No, show all.
         row_cells = f"<td>📈 {r}<br><span style='font-size:9px;color:#888'>Limit {capacity}</span></td>"
         limit_ratio = CAPACITY_LIMITS.get(media_select, 1.0)
         hard_limit = int(capacity * limit_ratio)
@@ -666,11 +684,11 @@ def render_ops_dashboard():
             
             bg = "inv-safe"
             if total > hard_limit: bg = "inv-crit"
-            elif pct > 1.0: bg = "inv-high" # Orange/Red Text
-            elif pct > 0.8: bg = "inv-mid" # Yellow
+            elif pct > 1.0: bg = "inv-high"
+            elif pct > 0.8: bg = "inv-mid"
             
             sim_cls = "inv-sim" if cell['pending'] > 0 and pct > 1.0 else ""
-            content = f"<div class='val-container'><span class='val-sec'>{total:,}</span><span class='val-pct'>{int(pct*100)}%</span></div>"
+            content = f"<div class='val-container'><span class='val-sec'>{total:,}</span><br><span class='val-pct'>{int(pct*100)}%</span></div>"
             row_cells += f"<td class='{bg} {sim_cls}'>{content}</td>"
         body_html += f"<tr>{row_cells}</tr>"
 
@@ -678,29 +696,52 @@ def render_ops_dashboard():
 
     st.markdown("### ⚡ 待審核案件")
     pending_orders = [o for o in st.session_state.db['orders'] if o['status'] == 'Pending']
-    if not pending_orders: st.info("無待審案件")
-    else:
-        for o in pending_orders:
-            items = [i for i in st.session_state.db['order_items'] if i['order_id'] == o['id']]
-            media_txt = list(set([i['media'] for i in items]))[0] if items else ""
-            budget_val = o.get('total_budget', o.get('budget', 0))
-            with st.container():
-                st.markdown(f"""
-                <div class='approval-card'>
-                    <h4 style='margin:0;color:#e65100;'>🟠 {o['client']}</h4>
-                    <p style='margin:5px 0;font-size:12px;'>業務: {o['sales']} | 媒體: {media_txt} | 預算: {budget_val:,}</p>
-                </div>
-                """, unsafe_allow_html=True)
-                c1, c2, c3 = st.columns([1, 1, 4]) # Fixed unpack error
-                if c1.button("🔍 檢視", key=f"view_{o['id']}"):
-                    st.session_state.ops_view_target = o
-                    st.rerun()
-                if c2.button("✅ 核准", key=f"app_{o['id']}"):
-                    o['status'] = "Probable"
-                    st.rerun()
-                if c3.button("❌ 駁回", key=f"rej_{o['id']}"):
-                    st.session_state.db['orders'].remove(o)
-                    st.rerun()
+    
+    col_pend, col_prob = st.tabs(["待審核 (Pending)", "已卡位 (Probable)"])
+    
+    with col_pend:
+        if not pending_orders: st.info("無待審案件")
+        else:
+            for o in pending_orders:
+                items = [i for i in st.session_state.db['order_items'] if i['order_id'] == o['id']]
+                media_txt = list(set([i['media'] for i in items]))[0] if items else ""
+                budget_val = o.get('total_budget', o.get('budget', 0))
+                with st.container():
+                    st.markdown(f"""
+                    <div class='approval-card'>
+                        <h4 style='margin:0;color:#e65100;'>🟠 {o['client']}</h4>
+                        <p style='margin:5px 0;font-size:12px;'>業務: {o['sales']} | 媒體: {media_txt} | 預算: {budget_val:,}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    c1, c2, c3 = st.columns([1, 1, 1])
+                    if c1.button("🔍 檢視", key=f"view_{o['id']}"):
+                        st.session_state.ops_view_target = o
+                        st.rerun()
+                    if c2.button("✅ 同意卡位 (80%)", key=f"app_{o['id']}"):
+                        o['status'] = "Probable"
+                        st.rerun()
+                    if c3.button("❌ 駁回", key=f"rej_{o['id']}"):
+                        st.session_state.db['orders'].remove(o)
+                        st.rerun()
+
+    with col_prob:
+        prob_orders = [o for o in st.session_state.db['orders'] if o['status'] == 'Probable']
+        if not prob_orders: st.info("無已卡位案件")
+        else:
+            for o in prob_orders:
+                items = [i for i in st.session_state.db['order_items'] if i['order_id'] == o['id']]
+                media_txt = list(set([i['media'] for i in items]))[0] if items else ""
+                budget_val = o.get('total_budget', o.get('budget', 0))
+                with st.container():
+                    st.markdown(f"""
+                    <div class='approval-card' style='border-left: 4px solid #7b1fa2;'>
+                        <h4 style='margin:0;color:#7b1fa2;'>🟣 {o['client']} (已卡位)</h4>
+                        <p style='margin:5px 0;font-size:12px;'>業務: {o['sales']} | 媒體: {media_txt} | 預算: {budget_val:,}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    if st.button("📝 正式簽約 (Confirmed)", key=f"sign_{o['id']}"):
+                        o['status'] = "Confirmed"
+                        st.rerun()
 
 def main():
     with st.sidebar:
